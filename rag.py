@@ -10,7 +10,7 @@ import tempfile
 
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
-# Used in review_app.py (Streamlit)
+
 def extract_text(file):
     if file.type == "application/pdf":
         text = ""
@@ -72,4 +72,5 @@ def search_faiss(query, faiss_path, top_k=5):
     query_embedding = model.encode([query])
     _, I = index.search(query_embedding, top_k)
     return [chunks[i] for i in I[0]]
+
 
