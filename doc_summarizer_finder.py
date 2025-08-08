@@ -6,13 +6,12 @@ from openai import OpenAI
 from dotenv import load_dotenv
 from docx import Document
 from rag import chunk_text, embed_chunks, save_to_faiss, search_faiss
-import numpy as np 
-import asyncio
-from openai import AsyncOpenAI
+import numpy as np
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Cache setup
+
 CACHE_DIR = ".cache_summaries"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
@@ -34,14 +33,16 @@ def save_cached_summary(file_hash, summary):
         f.write(summary)
 
 load_dotenv()
+
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-async_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
 
 st.set_page_config(page_title="Legal Summarizer")
 st.title("Legal Document Summarizer")
 st.markdown("Upload a legal document (PDF, DOCX, or TXT), and receive a concise summary or ask questions about it.")
 
 uploaded_file = st.file_uploader("Upload a file", type=["pdf", "docx", "txt"], accept_multiple_files=False)
+
 
 def extract_text(file):
     if file.type == "application/pdf":
@@ -77,44 +78,76 @@ def extract_text(file):
         return str(file.read(), "utf-8")
     return None
 
-async def summarize_chunk(start_idx, chunk_group):
-    chunk_texts = "\n\n".join(chunk_group)
+
+_CONCURRENCY_LIMIT = 5  
+
+def _group(seq, n):
+    for i in range(0, len(seq), n):
+        yield seq[i:i+n]
+
+def _needs_reduce(texts, max_chars=12000):
+
+    return sum(len(t) for t in texts) > max_chars
+
+def _summarize_group_sync(group_text: str) -> str:
     prompt = f"""
 You are a helpful legal assistant. Summarize the following portion of a legal document in clear and concise language.
 Focus on key events, involved parties, dates, and outcomes if mentioned.
 DO NOT number sections, do not label them, and do not include 'Document Chunk' in your response.
 Write only the plain summary sentences.
 
-{chunk_texts}
+{group_text}
 """
-    try:
-        resp = await async_client.chat.completions.create(
-            model="gpt-4-0613",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-            timeout=60
-        )
-        return resp.choices[0].message.content.strip()
-    except Exception as e:
-        return f"Failed to summarize: {e}"
+    resp = client.chat.completions.create(
+        model="gpt-4-0613",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2
+    )
+    return resp.choices[0].message.content.strip()
 
 def summarize_text(text):
     if not text or len(text.strip()) < 100:
         return "No usable content was extracted from the file."
-    
+
+
     chunks = chunk_text(text, chunk_size=1000)
     chunks = [c for c in chunks if len(c.strip()) > 50]
-    max_chunks = min(15, len(chunks))
 
-    batch_size = 2
-    batches = [chunks[i:i+batch_size] for i in range(0, max_chunks, batch_size)]
 
-    async def process_all():
-        tasks = [summarize_chunk(i*batch_size, batch) for i, batch in enumerate(batches)]
-        results = await asyncio.gather(*tasks)
-        return "".join(results)
+    group_size = 2
+    groups = ["\n\n".join(g) for g in _group(chunks, group_size)]
 
-    chunk_summaries = asyncio.run(process_all())
+    group_summaries = []
+    with ThreadPoolExecutor(max_workers=_CONCURRENCY_LIMIT) as ex:
+        futures = [ex.submit(_summarize_group_sync, g) for g in groups]
+        for fut in as_completed(futures):
+            group_summaries.append(fut.result())
+
+
+    group_summaries = list(
+        ThreadPoolExecutor(max_workers=_CONCURRENCY_LIMIT).map(_summarize_group_sync, groups)
+    )
+
+    while _needs_reduce(group_summaries):
+        reduce_bundle_size = 8
+        reduced = []
+        for bundle in _group(group_summaries, reduce_bundle_size):
+            bundle_text = "\n\n".join(bundle)
+            reduce_prompt = f"""
+You are a legal assistant. Merge the following partial summaries into a single cohesive paragraph.
+Focus on the main events, people, dates, treatments, and outcomes.
+Avoid repetitions and do not use bullet points, numbers, or labels.
+
+{bundle_text}
+"""
+            resp = client.chat.completions.create(
+                model="gpt-4-0613",
+                messages=[{"role": "user", "content": reduce_prompt}],
+                temperature=0.2
+            )
+            reduced.append(resp.choices[0].message.content.strip())
+        group_summaries = reduced
+
 
     final_prompt = f"""
 You are a legal assistant. Combine the following text into one cohesive paragraph.
@@ -122,7 +155,7 @@ Focus on the main events, people, dates, treatments, and outcomes.
 Avoid repetitions and do not use bullet points, numbers, or labels.
 Write it as a flowing narrative in one paragraph.
 
-{chunk_summaries}
+{"\n\n".join(group_summaries)}
 """
     try:
         resp = client.chat.completions.create(
@@ -143,6 +176,7 @@ def summarize_text_with_cache(text, file_bytes):
     save_cached_summary(file_hash, summary)
     return summary
 
+
 def find_answer(question, file_name):
     base_name = os.path.splitext(file_name)[0]
     temp_index_path = os.path.join(tempfile.gettempdir(), base_name)
@@ -160,19 +194,23 @@ Question:
 
 Answer clearly and concisely using only the document contents.
 """
-    response = client.chat.completions.create(
+    response = client.chat_completions.create( 
+        model="gpt-4-0613",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2
+    ) if hasattr(client, "chat_completions") else client.chat.completions.create(
         model="gpt-4-0613",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2
     )
     return response.choices[0].message.content.strip()
 
+
 if uploaded_file:
     summary_blocks = []
     block = f"**File: {uploaded_file.name}**\n\n"
     file_bytes = uploaded_file.getvalue()
 
-    
     text = extract_text(uploaded_file)
     if not text:
         block += "Could not extract text from this file. \n---"
@@ -185,18 +223,27 @@ if uploaded_file:
             temp_index_path = os.path.join(tempfile.gettempdir(), base_name)
             save_to_faiss(chunks, np.array(embeddings), faiss_path=temp_index_path)
 
-            action = st.radio(f"What would you like to do with **{uploaded_file.name}**?", ["Summarize", "Find Something"])
+            action = st.radio(
+                f"What would you like to do with **{uploaded_file.name}**?",
+                ["Summarize", "Find Something"]
+            )
 
             if action == "Summarize":
-                if st.button(f"Summarize {uploaded_file.name}"):
+               
+                with st.form(key=f"summarize_form_{uploaded_file.name}"):
+                    submitted_sum = st.form_submit_button(f"Summarize {uploaded_file.name}")
+                if submitted_sum:
                     with st.spinner("Summarizing..."):
                         summary = summarize_text_with_cache(text, file_bytes)
                         block += summary.replace("\n", " \n") + "\n\n---"
                         summary_blocks.append(block)
 
             elif action == "Find Something":
-                user_question = st.text_input(f"Enter your question about {uploaded_file.name}:")
-                if st.button(f"Find answer in {uploaded_file.name}"):
+               
+                with st.form(key=f"find_form_{uploaded_file.name}"):
+                    user_question = st.text_input(f"Enter your question about {uploaded_file.name}:")
+                    submitted = st.form_submit_button("Find Answer")
+                if submitted:
                     if user_question.strip():
                         with st.spinner("Searching..."):
                             answer = find_answer(user_question, uploaded_file.name)
@@ -204,7 +251,7 @@ if uploaded_file:
                             block += answer + "\n\n----"
                             summary_blocks.append(block)
                     else:
-                        block += "Please enter a question before clicking. \n---"
+                        block += "Please enter a question before submitting. \n---"
                         summary_blocks.append(block)
 
     for block in reversed(summary_blocks):
