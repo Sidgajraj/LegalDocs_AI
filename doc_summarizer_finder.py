@@ -10,9 +10,12 @@ import numpy as np
 import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import base64
+import time
 
 
 CACHE_DIR = ".cache_summaries"
+CACHE_TTL_DAYS = 30
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 def get_file_hash(file_bytes):
@@ -20,9 +23,19 @@ def get_file_hash(file_bytes):
     hasher.update(file_bytes)
     return hasher.hexdigest()
 
+def is_stale(path, ttl_days=CACHE_TTL_DAYS):
+    age_seconds = time.time() - os.path.getmtime(path)
+    return age_seconds > ttl_days * 24 * 60 * 60
+
 def load_cached_summary(file_hash):
     cache_path = os.path.join(CACHE_DIR, f"{file_hash}.txt")
     if os.path.exists(cache_path):
+        if is_stale(cache_path):
+            try:
+                os.remove(cache_path)
+            except OSError:
+                pass
+            return None
         with open(cache_path, "r", encoding="utf-8") as f:
             return f.read()
     return None
@@ -32,10 +45,57 @@ def save_cached_summary(file_hash, summary):
     with open(cache_path, "w", encoding="utf-8") as f:
         f.write(summary)
 
+def cleanup_cache(ttl_days=CACHE_TTL_DAYS):
+    for name in os.listdir(CACHE_DIR):
+        path = os.path.join(CACHE_DIR, name)
+        if os.path.isfile(path) and is_stale(path, ttl_days):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+cleanup_cache()
+
 load_dotenv()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+def set_background(image_file):
+    with open(image_file, "rb") as img:
+        encoded = base64.b64encode(img.read()).decode()
+    st.markdown(
+        f"""
+        <style>
+        html, body, .stApp {{
+            height: 100%;
+            margin: 0;
+            padding: -50;
+            padding-bottom: 15vh;
+            background-image: url("data:image/png;base64,{encoded}");
+            background-size: cover;
+            background-position: center calc(0% - 70px);
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+            color: black !important;
+        }}
+        .stApp {{
+            padding-top: 3.5rem;
+        }}
+        .stMarkdown, .stTextInput, .stExpander, .stTextInput > div > input {{
+            color: black !important;
+        }}
+        .streamlit-expanderHeader {{
+            color: black !important;
+        }}
+        header[data-testid="stHeader"] {{
+            background-color: rgba(255, 255, 255, 0);
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+set_background("Lakers.png")
 
 st.set_page_config(page_title="Legal Summarizer")
 st.title("Legal Document Summarizer")
