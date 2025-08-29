@@ -3,7 +3,6 @@ import faiss
 import pickle
 import numpy as np
 from sentence_transformers import SentenceTransformer
-from sklearn.feature_extraction.text import TfidfVectorizer
 import fitz
 from docx import Document
 import tempfile
@@ -18,28 +17,37 @@ def extract_text(file):
             tmp.write(file.read())
             tmp_path = tmp.name
 
-        doc = fitz.open(tmp_path)
-        max_pages = 1000
-        for i in range(min(len(doc), max_pages)):
-            text += doc[i].get_text()
-        doc.close()
-        os.remove(tmp_path)
+        try:
+            doc = fitz.open(tmp_path)
+            for page in doc:
+                text += page.get_text()
+            doc.close()
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
         return text
 
     elif file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
             tmp.write(file.read())
             tmp_path = tmp.name
-
-        doc = Document(tmp_path)
-        text = "\n".join(para.text for para in doc.paragraphs)
-        os.remove(tmp_path)
+        try:
+            doc = Document(tmp_path)
+            text = "\n".join(para.text for para in doc.paragraphs)
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
         return text
 
     elif file.type == "text/plain":
-        return str(file.read(), "utf-8")
+        return file.read().decode("utf-8", errors="ignore")
 
     return ""
+
 
 def chunk_text(text, chunk_size=500):
     paragraphs = text.split("\n")
@@ -54,8 +62,10 @@ def chunk_text(text, chunk_size=500):
         chunks.append(current.strip())
     return chunks
 
+
 def embed_chunks(chunks):
     return model.encode(chunks, show_progress_bar=False)
+
 
 def save_to_faiss(chunks, embeddings, faiss_path):
     index = faiss.IndexFlatL2(embeddings.shape[1])
@@ -63,6 +73,7 @@ def save_to_faiss(chunks, embeddings, faiss_path):
     faiss.write_index(index, faiss_path + ".index")
     with open(faiss_path + "_chunks.pkl", "wb") as f:
         pickle.dump(chunks, f)
+
 
 def search_faiss(query, faiss_path, top_k=5):
     index = faiss.read_index(faiss_path + ".index")
@@ -72,5 +83,3 @@ def search_faiss(query, faiss_path, top_k=5):
     query_embedding = model.encode([query])
     _, I = index.search(query_embedding, top_k)
     return [chunks[i] for i in I[0]]
-
-
