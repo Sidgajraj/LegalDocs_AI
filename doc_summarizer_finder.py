@@ -1,20 +1,18 @@
 import streamlit as st
 import os
 import tempfile
-import fitz
 from openai import OpenAI
 from dotenv import load_dotenv
-from docx import Document
-from rag import chunk_text, embed_chunks, save_to_faiss, search_faiss
+from rag import chunk_text, embed_chunks, save_to_faiss, search_faiss, extract_text
 import numpy as np
 import hashlib
-import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
+import base64
 import time
 
 
 CACHE_DIR = ".cache_summaries"
-CACHE_TTL_DAYS = 30
+CACHE_TTL_DAYS = 2  
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 def get_file_hash(file_bytes):
@@ -56,8 +54,49 @@ def cleanup_cache(ttl_days=CACHE_TTL_DAYS):
 cleanup_cache()
 
 load_dotenv()
-
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  
+
+
+def set_background(image_file):
+    try:
+        with open(image_file, "rb") as img:
+            encoded = base64.b64encode(img.read()).decode()
+        st.markdown(
+            f"""
+            <style>
+            html, body, .stApp {{
+                height: 100%;
+                margin: 0;
+                padding: -50;
+                padding-bottom: 15vh;
+                background-image: url("data:image/png;base64,{encoded}");
+                background-size: cover;
+                background-position: center calc(0% - 70px);
+                background-repeat: no-repeat;
+                background-attachment: fixed;
+                color: black !important;
+            }}
+            .stApp {{
+                padding-top: 3.5rem;
+            }}
+            .stMarkdown, .stTextInput, .stExpander, .stTextInput > div > input {{
+                color: black !important;
+            }}
+            .streamlit-expanderHeader {{
+                color: black !important;
+            }}
+            header[data-testid="stHeader"] {{
+                background-color: rgba(255, 255, 255, 0);
+            }}
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+    except Exception:
+        pass
+
+set_background("Lakers.png")
 
 st.set_page_config(page_title="Legal Summarizer")
 st.title("Legal Document Summarizer")
@@ -66,50 +105,22 @@ st.markdown("Upload a legal document (PDF, DOCX, or TXT), and receive a concise 
 uploaded_file = st.file_uploader("Upload a file", type=["pdf", "docx", "txt"], accept_multiple_files=False)
 
 
-def extract_text(file):
-    if file.type == "application/pdf":
-        text = ""
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf", dir=tempfile.gettempdir()) as tmp:
-            tmp.write(file.read())
-            tmp_path = tmp.name
-        try:
-            doc = fitz.open(tmp_path)
-            for page in doc:
-                text += page.get_text()
-            doc.close()
-        except Exception as e:
-            st.warning(f"Error extracting PDF text: {e}")
-            text = None
-        os.remove(tmp_path)
-        return text
-
-    elif file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx", dir=tempfile.gettempdir()) as tmp:
-            tmp.write(file.read())
-            tmp_path = tmp.name
-        try:
-            doc = Document(tmp_path)
-            text = "\n".join(para.text for para in doc.paragraphs)
-        except Exception as e:
-            st.warning(f"Error reading DOCX: {e}")
-            text = None
-        os.remove(tmp_path)
-        return text
-
-    elif file.type == "text/plain":
-        return str(file.read(), "utf-8")
-    return None
-
-
-_CONCURRENCY_LIMIT = 5  
+_CONCURRENCY_LIMIT = 5
 
 def _group(seq, n):
     for i in range(0, len(seq), n):
         yield seq[i:i+n]
 
 def _needs_reduce(texts, max_chars=12000):
-
     return sum(len(t) for t in texts) > max_chars
+
+def _ask_llm(prompt: str) -> str:
+    resp = client.responses.create(
+        model=MODEL_NAME,
+        input=prompt,
+        temperature=0.2,
+    )
+    return resp.output_text.strip()
 
 def _summarize_group_sync(group_text: str) -> str:
     prompt = f"""
@@ -120,35 +131,19 @@ Write only the plain summary sentences.
 
 {group_text}
 """
-    resp = client.chat.completions.create(
-        model="gpt-4-0613",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2
-    )
-    return resp.choices[0].message.content.strip()
+    return _ask_llm(prompt)
 
-def summarize_text(text):
+def summarize_text(text, file_hash_for_cache: str):
     if not text or len(text.strip()) < 100:
         return "No usable content was extracted from the file."
-
 
     chunks = chunk_text(text, chunk_size=1000)
     chunks = [c for c in chunks if len(c.strip()) > 50]
 
-
     group_size = 2
     groups = ["\n\n".join(g) for g in _group(chunks, group_size)]
-
-    group_summaries = []
     with ThreadPoolExecutor(max_workers=_CONCURRENCY_LIMIT) as ex:
-        futures = [ex.submit(_summarize_group_sync, g) for g in groups]
-        for fut in as_completed(futures):
-            group_summaries.append(fut.result())
-
-
-    group_summaries = list(
-        ThreadPoolExecutor(max_workers=_CONCURRENCY_LIMIT).map(_summarize_group_sync, groups)
-    )
+        group_summaries = list(ex.map(_summarize_group_sync, groups))
 
     while _needs_reduce(group_summaries):
         reduce_bundle_size = 8
@@ -162,14 +157,8 @@ Avoid repetitions and do not use bullet points, numbers, or labels.
 
 {bundle_text}
 """
-            resp = client.chat.completions.create(
-                model="gpt-4-0613",
-                messages=[{"role": "user", "content": reduce_prompt}],
-                temperature=0.2
-            )
-            reduced.append(resp.choices[0].message.content.strip())
+            reduced.append(_ask_llm(reduce_prompt))
         group_summaries = reduced
-
 
     final_prompt = f"""
 You are a legal assistant. Combine the following text into one cohesive paragraph.
@@ -180,31 +169,22 @@ Write it as a flowing narrative in one paragraph.
 {"\n\n".join(group_summaries)}
 """
     try:
-        resp = client.chat.completions.create(
-            model="gpt-4-0613",
-            messages=[{"role": "user", "content": final_prompt}],
-            temperature=0.2
-        )
-        return resp.choices[0].message.content.strip()
+        final_summary = _ask_llm(final_prompt)
+        return final_summary
     except Exception as e:
         return f"Failed to generate final summary: {e}"
 
-def summarize_text_with_cache(text, file_bytes):
-    file_hash = get_file_hash(file_bytes)
-    cached = load_cached_summary(file_hash)
+def summarize_text_with_cache(text, file_bytes, file_hash_for_cache: str):
+    cached = load_cached_summary(file_hash_for_cache)
     if cached:
         return cached
-    summary = summarize_text(text)
-    save_cached_summary(file_hash, summary)
+    summary = summarize_text(text, file_hash_for_cache)
+    save_cached_summary(file_hash_for_cache, summary)
     return summary
 
-
-def find_answer(question, file_name):
-    base_name = os.path.splitext(file_name)[0]
-    temp_index_path = os.path.join(tempfile.gettempdir(), base_name)
-    top_chunks = search_faiss(question, faiss_path=temp_index_path)
+def find_answer(question: str, faiss_path: str):
+    top_chunks = search_faiss(question, faiss_path=faiss_path)
     context = "\n\n".join(top_chunks)
-
     prompt = f"""
 You are a legal assistant. Use the context below to answer the user's question.
 
@@ -216,22 +196,19 @@ Question:
 
 Answer clearly and concisely using only the document contents.
 """
-    response = client.chat_completions.create( 
-        model="gpt-4-0613",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2
-    ) if hasattr(client, "chat_completions") else client.chat.completions.create(
-        model="gpt-4-0613",
-        messages=[{"role": "user", "content": prompt}],
+    resp = client.responses.create(
+        model=MODEL_NAME,
+        input=prompt,
         temperature=0.2
     )
-    return response.choices[0].message.content.strip()
+    return resp.output_text.strip()
 
 
 if uploaded_file:
     summary_blocks = []
     block = f"**File: {uploaded_file.name}**\n\n"
     file_bytes = uploaded_file.getvalue()
+    file_hash = get_file_hash(file_bytes)
 
     text = extract_text(uploaded_file)
     if not text:
@@ -239,10 +216,11 @@ if uploaded_file:
         summary_blocks.append(block)
     else:
         with st.spinner("Preparing for question answering..."):
-            chunks = chunk_text(text)
+            chunks = chunk_text(text)  
             embeddings = embed_chunks(chunks)
+
             base_name = os.path.splitext(uploaded_file.name)[0]
-            temp_index_path = os.path.join(tempfile.gettempdir(), base_name)
+            temp_index_path = os.path.join(tempfile.gettempdir(), f"{base_name}_{file_hash[:8]}")
             save_to_faiss(chunks, np.array(embeddings), faiss_path=temp_index_path)
 
             action = st.radio(
@@ -251,24 +229,22 @@ if uploaded_file:
             )
 
             if action == "Summarize":
-               
                 with st.form(key=f"summarize_form_{uploaded_file.name}"):
                     submitted_sum = st.form_submit_button(f"Summarize {uploaded_file.name}")
                 if submitted_sum:
                     with st.spinner("Summarizing..."):
-                        summary = summarize_text_with_cache(text, file_bytes)
+                        summary = summarize_text_with_cache(text, file_bytes, file_hash)
                         block += summary.replace("\n", " \n") + "\n\n---"
                         summary_blocks.append(block)
 
             elif action == "Find Something":
-               
                 with st.form(key=f"find_form_{uploaded_file.name}"):
                     user_question = st.text_input(f"Enter your question about {uploaded_file.name}:")
                     submitted = st.form_submit_button("Find Answer")
                 if submitted:
                     if user_question.strip():
                         with st.spinner("Searching..."):
-                            answer = find_answer(user_question, uploaded_file.name)
+                            answer = find_answer(user_question, temp_index_path)
                             block += f"**Question:** {user_question} \n\n"
                             block += answer + "\n\n----"
                             summary_blocks.append(block)
@@ -278,4 +254,3 @@ if uploaded_file:
 
     for block in reversed(summary_blocks):
         st.markdown(block)
-
