@@ -92,39 +92,6 @@ load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
-
-def set_background(image_file):
-    try:
-        with open(image_file, "rb") as img:
-            encoded = base64.b64encode(img.read()).decode()
-        st.markdown(
-            f"""
-            <style>
-            html, body, .stApp {{
-                height: 100%;
-                margin: 0;
-                padding: -50;
-                padding-bottom: 15vh;
-                background-image: url("data:image/png;base64,{encoded}");
-                background-size: cover;
-                background-position: center calc(0% - 70px);
-                background-repeat: no-repeat;
-                background-attachment: fixed;
-                color: black !important;
-            }}
-            .stApp {{ padding-top: 3.5rem; }}
-            .stMarkdown, .stTextInput, .stExpander, .stTextInput > div > input {{ color: black !important; }}
-            .streamlit-expanderHeader {{ color: black !important; }}
-            header[data-testid="stHeader"] {{ background-color: rgba(255, 255, 255, 0); }}
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
-    except Exception:
-        pass
-
-set_background("Lakers.png")
-
 st.set_page_config(page_title="Legal Summarizer")
 st.title("Legal Document Summarizer")
 st.markdown("Upload a legal document (PDF, DOCX, or TXT), and receive a concise summary or ask questions about it.")
@@ -349,3 +316,4 @@ if uploaded_file:
 
     for block in reversed(summary_blocks):
         st.markdown(block)
+
