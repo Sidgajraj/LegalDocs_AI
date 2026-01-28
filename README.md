@@ -42,3 +42,7 @@ You upload a long contract, deposition, or case file. In seconds, you get a clea
 
 Why It Matters
 Legal work involves massive amounts of reading and analysis. This project reduces that workload dramatically. It makes it easier to find the key points in long files, saves hours of manual review, and ensures that responses stay factual and document-based. It is built to make legal reading faster, clearer, and more efficient.
+
+[InternetShortcut]
+URL=https://github.com/Sidgajraj/LegalDocs_AI/blob/main/Summarizer%20video.mp4
+
