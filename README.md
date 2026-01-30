@@ -25,11 +25,14 @@ To run the project, install the dependencies, set your OpenAI API key, and make 
 conda create -n LegalDocs_AI python=3.11 -y
 conda activate LegalDocs_AI
 pip install -r requirements.txt
-# Ubuntu/WSL
+
+Ubuntu/WSL
 sudo apt-get update
 sudo apt-get install -y tesseract-ocr
+
 export OPENAI_API_KEY="your_key_here"
-# optional:
+
+optional:
 export OPENAI_MODEL="gpt-4o-mini"
 cd app
 streamlit run doc_summarizer_finder.py
