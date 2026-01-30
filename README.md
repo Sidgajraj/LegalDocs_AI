@@ -22,6 +22,18 @@ NumPy and Pickle for embeddings and caching
 
 Setup
 To run the project, install the dependencies, set your OpenAI API key, and make sure Tesseract is properly configured. Once everything is ready, start the app with Streamlit and upload a document from your local machine.
+conda create -n LegalDocs_AI python=3.11 -y
+conda activate LegalDocs_AI
+pip install -r requirements.txt
+# Ubuntu/WSL
+sudo apt-get update
+sudo apt-get install -y tesseract-ocr
+export OPENAI_API_KEY="your_key_here"
+# optional:
+export OPENAI_MODEL="gpt-4o-mini"
+cd app
+streamlit run doc_summarizer_finder.py
+
 
 How It Works
 When a document is uploaded, the app first extracts its text. For PDFs, it tries to read the native text and switches to OCR if the document is scanned. Once extracted, the text is cleaned and split into manageable chunks. Each chunk is summarized in parallel, and those smaller summaries are merged until the final version reads like a concise narrative.
