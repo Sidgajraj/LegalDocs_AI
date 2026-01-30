@@ -212,13 +212,15 @@ Avoid repetitions and do not use bullet points, numbers, or labels.
             reduced.append(_ask_llm(reduce_prompt))
         group_summaries = reduced
 
+    joined_summaries = "\n\n".join(group_summaries)
+
     final_prompt = f"""
 You are a legal assistant. Combine the following text into one cohesive paragraph.
 Focus on the main events, people, dates, treatments, and outcomes.
 Avoid repetitions and do not use bullet points, numbers, or labels.
 Write it as a flowing narrative in one paragraph.
 
-{"\n\n".join(group_summaries)}
+{joined_summaries}
 """
     try:
         final_summary = _ask_llm(final_prompt)
@@ -287,6 +289,7 @@ if uploaded_file:
             if submitted_sum:
                 with st.spinner("Summarizing..."):
                     summary = summarize_text_with_cache(text, file_bytes, file_hash)
+
                     block += summary.replace("\n", " \n") + "\n\n---"
                     summary_blocks.append(block)
 
