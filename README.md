@@ -5,7 +5,7 @@ This project is a legal document summarizer and search assistant built with Stre
 Demo Video
 A short walkthrough showing document upload, summarization, semantic search, and grounded Q&A in real time. 
 
-[[![Demo Video](https://img.youtube.com/vi/2tuwNbmgkwg/hqdefault.jpg)](https://youtu.be/2tuwNbmgkwg)](https://github.com/user-attachments/assets/db17c31a-efd0-421a-b549-b3e65bfc4ce9)
+[[![Demo Video](https://img.youtube.com/vi/2tuwNbmgkwg/hqdefault.jpg)](https://youtu.be/2tuwNbmgkwg)]
 
 What It Does
 You upload a file and the app gets to work. If you choose Summarize, it breaks the document into smaller pieces, summarizes each part using GPT, and then merges everything into one clear and easy-to-read paragraph. If you choose Find Something, it converts the document into searchable embeddings using FAISS and Sentence Transformers. You can then ask any question like "Who was the defendant?" or "What was the final judgment?" and it finds the most relevant sections and answers based only on the actual content of the file.
