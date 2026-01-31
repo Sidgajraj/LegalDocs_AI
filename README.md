@@ -4,6 +4,7 @@ This project is a legal document summarizer and search assistant built with Stre
 
 Demo Video
 A short walkthrough showing document upload, summarization, semantic search, and grounded Q&A in real time. 
+
 [![Demo Video](https://img.youtube.com/vi/2tuwNbmgkwg/hqdefault.jpg)](https://youtu.be/2tuwNbmgkwg)
 
 What It Does
