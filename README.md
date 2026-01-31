@@ -2,7 +2,9 @@ Legal Document Summarizer
 
 This project is a legal document summarizer and search assistant built with Streamlit and OpenAI. It reads long legal documents, summarizes them clearly, and can also answer specific questions about the content. It is designed to handle real-world files such as PDFs, Word documents, and scanned pages using OCR, embeddings, and caching to make the experience fast and reliable.
 
-A demo video is included in the repository showing how the app works from upload to summary and search. It gives a quick overview of the workflow and helps visualize how the tool performs in real time.
+Demo Video
+A short walkthrough showing document upload, summarization, semantic search, and grounded Q&A in real time. 
+https://youtu.be/2tuwNbmgkwg?si=310qwD31g8xjzvl4
 
 What It Does
 You upload a file and the app gets to work. If you choose Summarize, it breaks the document into smaller pieces, summarizes each part using GPT, and then merges everything into one clear and easy-to-read paragraph. If you choose Find Something, it converts the document into searchable embeddings using FAISS and Sentence Transformers. You can then ask any question like "Who was the defendant?" or "What was the final judgment?" and it finds the most relevant sections and answers based only on the actual content of the file.
@@ -32,7 +34,7 @@ sudo apt-get install -y tesseract-ocr
 
 export OPENAI_API_KEY="your_key_here"
 
-optional:
+optional
 export OPENAI_MODEL="gpt-4o-mini"
 cd app
 streamlit run doc_summarizer_finder.py
@@ -41,6 +43,12 @@ streamlit run doc_summarizer_finder.py
 How It Works
 When a document is uploaded, the app first extracts its text. For PDFs, it tries to read the native text and switches to OCR if the document is scanned. Once extracted, the text is cleaned and split into manageable chunks. Each chunk is summarized in parallel, and those smaller summaries are merged until the final version reads like a concise narrative.
 In search mode, the document is embedded into FAISS, allowing the system to find and return the most relevant passages to answer the user’s question while staying fully grounded in the document.
+
+Technical Deep Dive
+I wrote a blog post breaking down the architecture, design decisions, and tradeoffs behind this project,
+including OCR handling, chunking strategy, caching, and retrieval grounding.
+https://medium.com/@sidgajraj/building-an-ai-legal-summarizer-that-reads-1000-page-documents-in-seconds-with-llms-rag-and-42e1591c536d
+
 
 Caching
 Every file uploaded is hashed and cached. If you upload the same file again, the summarization or search loads instantly from cache. The cache automatically clears every few days to keep things fresh.
