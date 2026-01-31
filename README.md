@@ -48,6 +48,8 @@ In search mode, the document is embedded into FAISS, allowing the system to find
 Technical Deep Dive
 I wrote a blog post breaking down the architecture, design decisions, and tradeoffs behind this project,
 including OCR handling, chunking strategy, caching, and retrieval grounding.
+
+
 https://medium.com/@sidgajraj/building-an-ai-legal-summarizer-that-reads-1000-page-documents-in-seconds-with-llms-rag-and-42e1591c536d
 
 
